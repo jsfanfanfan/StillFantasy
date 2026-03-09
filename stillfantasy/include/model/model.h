@@ -54,6 +54,12 @@ class Model {
                                     const op::EmbeddingOutput& embedding_output,
                                     bool is_prompt) const;
 
+  /** 供 engine 做 KV 块拷贝与 BlockManager 使用 */
+  int32_t get_layer_num() const { return config_ ? config_->layer_num_ : 0; }
+  int32_t get_seq_len() const { return config_ ? config_->seq_len_ : 0; }
+  int32_t get_kv_dim() const { return config_ ? config_->kv_dim_ : 0; }
+  base::DeviceType get_device_type() const { return device_type_; }
+
  protected:
   virtual base::Status insert_buffer(ModelBufferType buffer_idx, const tensor::Tensor& tensor);
 
