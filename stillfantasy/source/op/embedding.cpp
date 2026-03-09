@@ -4,11 +4,11 @@
 #include "op/layer.h"
 namespace op {
 EmbeddingLayer::EmbeddingLayer(base::DeviceType device_type, int32_t dim, int32_t seq_len,
-                               int32_t vocab_size)
+                               int32_t vocab_size, base::DataType data_type)
     : dim_(dim),
       seq_len_(seq_len),
       vocab_size_(vocab_size),
-      LayerParam(device_type, LayerType::kLayerEmbedding, false, "Embedding") {
+      LayerParam(device_type, LayerType::kLayerEmbedding, false, "Embedding", data_type) {
   reset_weight_size(1);
   reset_input_size(2);
   reset_output_size(1);
@@ -28,7 +28,8 @@ base::Status EmbeddingLayer::check() const {
     return status;
   }
 
-  status = check_tensor_with_dim(get_weight(0), device_type_, data_type_, vocab_size_, dim_);
+  status = check_tensor_with_dim(get_weight(0), device_type_, base::DataType::kDataTypeFp32,
+                                 vocab_size_, dim_);
   if (!status) {
     LOG(ERROR) << "The weight tensor error in the embedding layer.";
     return status;

@@ -92,7 +92,9 @@ class BaseLayer {
 
 class Layer : public BaseLayer {
  public:
-  explicit Layer(base::DeviceType device_type, LayerType layer_type, std::string layer_name = "");
+  explicit Layer(base::DeviceType device_type, LayerType layer_type,
+                std::string layer_name = "",
+                base::DataType data_type = base::DataType::kDataTypeFp32);
 
   base::Status init() override;
 
@@ -157,7 +159,8 @@ class Layer : public BaseLayer {
 class LayerParam : public Layer {
  public:
   explicit LayerParam(base::DeviceType device_type, LayerType layer_type,
-                      bool is_quant_layer = false, std::string layer_name = "");
+                      bool is_quant_layer = false, std::string layer_name = "",
+                      base::DataType data_type = base::DataType::kDataTypeFp32);
 
   size_t weight_size() const;
 

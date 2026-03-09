@@ -3,8 +3,8 @@
 #include "kernels/kernels_interface.h"
 namespace op {
 MatmulLayer::MatmulLayer(base::DeviceType device_type, int32_t dim0, int32_t dim1,
-                         bool is_quant_layer, bool has_bias)
-    : LayerParam(device_type, LayerType::kLayerMatmul, is_quant_layer, "Matmul"),
+                         bool is_quant_layer, bool has_bias, base::DataType data_type)
+    : LayerParam(device_type, LayerType::kLayerMatmul, is_quant_layer, "Matmul", data_type),
       dim0_(dim0),
       dim1_(dim1),
       has_bias_(has_bias) {
@@ -24,7 +24,8 @@ base::Status MatmulLayer::check() const {
   }
 
   if (!is_quant_layer_) {
-    status = check_tensor_with_dim(get_weight(0), device_type_, data_type_, dim0_, dim1_);
+    status = check_tensor_with_dim(get_weight(0), device_type_, base::DataType::kDataTypeFp32,
+                                   dim0_, dim1_);
     if (!status) {
       LOG(ERROR) << "The weight tensor error in the matmul layer.";
       return status;

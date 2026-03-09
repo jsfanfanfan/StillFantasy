@@ -4,8 +4,9 @@
 namespace op {
 MultiHeadAttention::MultiHeadAttention(base::DeviceType device_type, int32_t layer_index,
                                        int32_t kv_mul, int32_t kv_dim, int32_t seq_len,
-                                       int32_t head_num, int32_t head_size)
-    : Layer(device_type, LayerType::kLayerMHA, "MultiHead"),
+                                       int32_t head_num, int32_t head_size,
+                                       base::DataType data_type)
+    : Layer(device_type, LayerType::kLayerMHA, "MultiHead", data_type),
       layer_index_(layer_index),
       kv_mul_(kv_mul),
       kv_dim_(kv_dim),

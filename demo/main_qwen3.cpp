@@ -58,15 +58,20 @@ std::string fill_template(const std::string& content) {
 }
 
 int main(int argc, char* argv[]) {
-  if (argc != 3) {
-    LOG(INFO) << "Usage: ./demo checkpoint path tokenizer path";
+  if (argc < 3) {
+    LOG(INFO) << "Usage: ./demo checkpoint_path tokenizer_path [--fp16|--bf16]";
     return -1;
   }
-  const char* checkpoint_path = argv[1];  // e.g. out/model.bin
+  const char* checkpoint_path = argv[1];
   const char* tokenizer_path = argv[2];
+  base::DataType activation_dtype = base::DataType::kDataTypeFp32;
+  for (int i = 3; i < argc; i++) {
+    if (std::string(argv[i]) == "--fp16") activation_dtype = base::DataType::kDataTypeFp16;
+    else if (std::string(argv[i]) == "--bf16") activation_dtype = base::DataType::kDataTypeBf16;
+  }
 
   model::Qwen3Model model(base::TokenizerType::kEncodeBpe, tokenizer_path, checkpoint_path, false);
-  auto init_status = model.init(base::DeviceType::kDeviceCUDA);
+  auto init_status = model.init(base::DeviceType::kDeviceCUDA, activation_dtype);
   if (!init_status) {
     LOG(FATAL) << "The model init failed, the error code is: " << init_status.get_err_code();
   }

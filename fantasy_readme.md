@@ -79,6 +79,18 @@ demo/
 
 ---
 
+## W8A16（FP16 / BF16）激活量化
+
+在现有 **W8A32**（int8 权重量化 + fp32 激活）基础上，支持 **W8A16**：权重大矩阵仍为 int8 + 每 group 一个 fp32 scale，**激活**（embedding 输出、各层输入/输出、KV cache、logits 等）统一为 16 位，可选 **FP16** 或 **BF16**。
+
+- **使用方式**：构造/初始化模型时指定激活 dtype；Demo 支持可选参数：
+  - `./still_fantasy checkpoint_path tokenizer_path [--fp16]` 或 `[--bf16]`
+  - `./main_engine checkpoint_path tokenizer_path [num_sequences] [--fp16|--bf16]`
+- **约束**：W8A16 仅支持 **CUDA**；CPU 下若指定 `--fp16`/`--bf16` 会报错。可与量化模型（int8 权重）搭配使用。
+- **实现要点**：`Model::init(device_type, activation_dtype)`；Engine 的 BlockManager KV 池与 model 的 `activation_dtype` 一致；采样前将 A16 logits 转为 float 再调用现有 Sampler。
+
+---
+
 ## 使用与阅读建议
 
 - **单序列推理、模型导出、量化、编译**：以原 [readme.md](readme.md) 为准。

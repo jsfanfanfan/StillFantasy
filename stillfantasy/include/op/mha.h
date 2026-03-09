@@ -7,7 +7,8 @@ class MultiHeadAttention : public op::Layer {
  public:
   explicit MultiHeadAttention(base::DeviceType device_type, int32_t layer_index,
                               int32_t kv_mul, int32_t kv_dim, int32_t seq_len,
-                              int32_t head_num, int32_t head_size);
+                              int32_t head_num, int32_t head_size,
+                              base::DataType data_type = base::DataType::kDataTypeFp32);
 
   base::Status check() const override;
 

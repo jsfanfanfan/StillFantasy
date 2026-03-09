@@ -1,5 +1,7 @@
 #include <device_launch_parameters.h>
 #include <cub/block/block_reduce.cuh>
+#include <cuda_fp16.h>
+#include <cuda_bf16.h>
 #include "rmsnorm_kernel.cuh"
 namespace kernel {
 /**
@@ -107,6 +109,53 @@ static __global__ void row_rmsnorm_f32(float* in, float* wei, float* out, int si
   }
 }
 
+template <typename T, int32_t BLOCK_DIM>
+static __global__ void row_rmsnorm_T(const T* in, const float* wei, T* out, int size, float eps) {
+  const int tid = threadIdx.x;
+  float sum = 0.0f;
+  for (int i = tid; i < size; i += blockDim.x) {
+    float x = static_cast<float>(in[i]);
+    sum += x * x;
+  }
+  using BlockReduce = cub::BlockReduce<float, BLOCK_DIM>;
+  __shared__ typename BlockReduce::TempStorage temp;
+  sum = BlockReduce(temp).Sum(sum);
+  __shared__ float shared_val;
+  if (threadIdx.x == 0) shared_val = sum;
+  __syncthreads();
+  sum = shared_val;
+  const float scale = rsqrtf(sum / static_cast<float>(size) + eps);
+  for (int i = tid; i < size; i += blockDim.x) {
+    out[i] = static_cast<T>(wei[i] * static_cast<float>(in[i]) * scale);
+  }
+}
+
+template <typename T>
+static __global__ void row_rmsnorm_T_dim(const T* in, const float* wei, T* out, int dim_size,
+                                        int size, float eps) {
+  const int bid = blockIdx.x;
+  const int tid = threadIdx.x;
+  if (bid >= dim_size) return;
+  const T* block_in = in + bid * size;
+  T* block_out = out + bid * size;
+  float sum = 0.0f;
+  for (int i = tid; i < size; i += blockDim.x) {
+    float x = static_cast<float>(block_in[i]);
+    sum += x * x;
+  }
+  using BlockReduce = cub::BlockReduce<float, 128>;
+  __shared__ typename BlockReduce::TempStorage temp;
+  sum = BlockReduce(temp).Sum(sum);
+  __shared__ float shared_val;
+  if (threadIdx.x == 0) shared_val = sum;
+  __syncthreads();
+  sum = shared_val;
+  const float scale = rsqrtf(sum / static_cast<float>(size) + eps);
+  for (int i = tid; i < size; i += blockDim.x) {
+    block_out[i] = static_cast<T>(wei[i] * static_cast<float>(block_in[i]) * scale);
+  }
+}
+
 void rmsnorm_kernel_cu(const tensor::Tensor& input, const tensor::Tensor& weight,
                        const tensor::Tensor& output, void* stream) {
   CHECK(!input.is_empty());
@@ -123,16 +172,37 @@ void rmsnorm_kernel_cu(const tensor::Tensor& input, const tensor::Tensor& weight
   const float eps = 1e-5f;
 #endif
   const int32_t size = static_cast<int32_t>(input.size());
-  float* in_ptr = const_cast<float*>(input.ptr<float>());
-  float* wei_ptr = const_cast<float*>(weight.ptr<float>());
-  float* out_ptr = const_cast<float*>(output.ptr<float>());
   constexpr int threads_num = 128;
-  if (stream) {
-    cudaStream_t stream_ = static_cast<cudaStream_t>(stream);
-    row_rmsnorm_f32<128><<<1, threads_num, 0, stream_>>>(in_ptr, wei_ptr, out_ptr, size, eps);
-  } else {
-    row_rmsnorm_f32<128><<<1, threads_num>>>(in_ptr, wei_ptr, out_ptr, size, eps);
+  cudaStream_t stream_ = stream ? static_cast<cudaStream_t>(stream) : 0;
+
+  base::DataType dtype = input.data_type();
+  if (dtype == base::DataType::kDataTypeFp32) {
+    float* in_ptr = const_cast<float*>(input.ptr<float>());
+    float* wei_ptr = const_cast<float*>(weight.ptr<float>());
+    float* out_ptr = const_cast<float*>(output.ptr<float>());
+    if (stream_) {
+      row_rmsnorm_f32<128><<<1, threads_num, 0, stream_>>>(in_ptr, wei_ptr, out_ptr, size, eps);
+    } else {
+      row_rmsnorm_f32<128><<<1, threads_num>>>(in_ptr, wei_ptr, out_ptr, size, eps);
+    }
+    return;
   }
+  if (dtype == base::DataType::kDataTypeFp16) {
+    __half* in_ptr = const_cast<__half*>(input.ptr<__half>());
+    float* wei_ptr = const_cast<float*>(weight.ptr<float>());
+    __half* out_ptr = const_cast<__half*>(output.ptr<__half>());
+    row_rmsnorm_T<__half, 128><<<1, threads_num, 0, stream_>>>(in_ptr, wei_ptr, out_ptr, size, eps);
+    return;
+  }
+  if (dtype == base::DataType::kDataTypeBf16) {
+    __nv_bfloat16* in_ptr = const_cast<__nv_bfloat16*>(input.ptr<__nv_bfloat16>());
+    float* wei_ptr = const_cast<float*>(weight.ptr<float>());
+    __nv_bfloat16* out_ptr = const_cast<__nv_bfloat16*>(output.ptr<__nv_bfloat16>());
+    row_rmsnorm_T<__nv_bfloat16, 128><<<1, threads_num, 0, stream_>>>(in_ptr, wei_ptr, out_ptr, size,
+                                                                     eps);
+    return;
+  }
+  LOG(FATAL) << "rmsnorm_kernel_cu: unsupported dtype";
 }
 
 void rmsnorm_kernel_cu_dim(const tensor::Tensor& input, const tensor::Tensor& weight,
@@ -149,17 +219,38 @@ void rmsnorm_kernel_cu_dim(const tensor::Tensor& input, const tensor::Tensor& we
   const int32_t total_size = static_cast<int32_t>(input.size());
   const int32_t size = input.get_dim(input.dims_size() - 1);
   const int32_t dim_size = total_size / size;
-
-  float* in_ptr = const_cast<float*>(input.ptr<float>());
-  float* wei_ptr = const_cast<float*>(weight.ptr<float>());
-  float* out_ptr = const_cast<float*>(output.ptr<float>());
   constexpr int threads_num = 128;
-  if (stream) {
-    cudaStream_t stream_ = static_cast<cudaStream_t>(stream);
-    row_rmsnorm_f32_dim<<<dim_size, threads_num, 0, stream_>>>(in_ptr, wei_ptr, out_ptr, dim_size,
-                                                               size, eps);
-  } else {
-    row_rmsnorm_f32_dim<<<dim_size, threads_num>>>(in_ptr, wei_ptr, out_ptr, dim_size, size, eps);
+  cudaStream_t stream_ = stream ? static_cast<cudaStream_t>(stream) : 0;
+
+  base::DataType dtype = input.data_type();
+  if (dtype == base::DataType::kDataTypeFp32) {
+    float* in_ptr = const_cast<float*>(input.ptr<float>());
+    float* wei_ptr = const_cast<float*>(weight.ptr<float>());
+    float* out_ptr = const_cast<float*>(output.ptr<float>());
+    if (stream_) {
+      row_rmsnorm_f32_dim<<<dim_size, threads_num, 0, stream_>>>(in_ptr, wei_ptr, out_ptr, dim_size,
+                                                                 size, eps);
+    } else {
+      row_rmsnorm_f32_dim<<<dim_size, threads_num>>>(in_ptr, wei_ptr, out_ptr, dim_size, size, eps);
+    }
+    return;
   }
+  if (dtype == base::DataType::kDataTypeFp16) {
+    __half* in_ptr = const_cast<__half*>(input.ptr<__half>());
+    float* wei_ptr = const_cast<float*>(weight.ptr<float>());
+    __half* out_ptr = const_cast<__half*>(output.ptr<__half>());
+    row_rmsnorm_T_dim<__half><<<dim_size, threads_num, 0, stream_>>>(in_ptr, wei_ptr, out_ptr,
+                                                                      dim_size, size, eps);
+    return;
+  }
+  if (dtype == base::DataType::kDataTypeBf16) {
+    __nv_bfloat16* in_ptr = const_cast<__nv_bfloat16*>(input.ptr<__nv_bfloat16>());
+    float* wei_ptr = const_cast<float*>(weight.ptr<float>());
+    __nv_bfloat16* out_ptr = const_cast<__nv_bfloat16*>(output.ptr<__nv_bfloat16>());
+    row_rmsnorm_T_dim<__nv_bfloat16><<<dim_size, threads_num, 0, stream_>>>(
+        in_ptr, wei_ptr, out_ptr, dim_size, size, eps);
+    return;
+  }
+  LOG(FATAL) << "rmsnorm_kernel_cu_dim: unsupported dtype";
 }
 }  // namespace kernel

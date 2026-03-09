@@ -5,6 +5,7 @@
 #ifndef LLAMA_INFER_NON_SAMPLER_H
 #define LLAMA_INFER_NON_SAMPLER_H
 #include <base/base.h>
+#include <vector>
 #include "sampler.h"
 namespace sampler {
 class ArgmaxSampler : public Sampler {
@@ -12,6 +13,9 @@ class ArgmaxSampler : public Sampler {
   explicit ArgmaxSampler(base::DeviceType device_type) : Sampler(device_type) {}
 
   size_t sample(const float* logits, size_t size, void* stream) override;
+
+ private:
+  std::vector<float> logits_cpu_;
 };
 }  // namespace sampler
 #endif  // LLAMA_INFER_NON_SAMPLER_H

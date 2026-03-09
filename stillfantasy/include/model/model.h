@@ -17,7 +17,8 @@ class Model {
   explicit Model(base::TokenizerType tokenizer_type, base::ModelType model_type,
                  std::string token_path, std::string model_path, bool is_quant_model);
 
-  virtual base::Status init(base::DeviceType device_type) = 0;
+  virtual base::Status init(base::DeviceType device_type,
+                           base::DataType activation_dtype = base::DataType::kDataTypeFp32) = 0;
 
   virtual base::Status predict(const tensor::Tensor& input, const tensor::Tensor& pos_tensor,
                                bool is_prompt, int& next) const = 0;
@@ -59,6 +60,12 @@ class Model {
   int32_t get_seq_len() const { return config_ ? config_->seq_len_ : 0; }
   int32_t get_kv_dim() const { return config_ ? config_->kv_dim_ : 0; }
   base::DeviceType get_device_type() const { return device_type_; }
+  base::DataType get_activation_dtype() const { return activation_dtype_; }
+
+  /** 设置采样温度（默认 1.0；<1 更确定，>1 更随机） */
+  void set_temperature(float t) {
+    if (sampler_) sampler_->set_temperature(t);
+  }
 
  protected:
   virtual base::Status insert_buffer(ModelBufferType buffer_idx, const tensor::Tensor& tensor);
@@ -98,6 +105,7 @@ class Model {
   base::DeviceType device_type_ = base::DeviceType::kDeviceUnknown;
   base::ModelType model_type_ = base::ModelType::kModelTypeUnknown;
   base::TokenizerType tokenizer_type_ = base::TokenizerType::kEncodeUnknown;
+  base::DataType activation_dtype_ = base::DataType::kDataTypeFp32;
 };
 }  // namespace model
 #endif  // STILLFANTASY_INCLUDE_MODEL_MODEL_H_

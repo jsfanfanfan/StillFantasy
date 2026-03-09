@@ -1,6 +1,7 @@
 #include <base/base.h>
 #include <base/tick.h>
 #include <glog/logging.h>
+#include <string>
 #include "model/qwen2.h"
 int32_t generate(const model::Qwen2Model& model, const std::string& sentence, int total_steps,
                  bool need_output = false) {
@@ -49,16 +50,21 @@ int32_t generate(const model::Qwen2Model& model, const std::string& sentence, in
 
 
 int main(int argc, char* argv[]) {
-  if (argc != 3) {
-    LOG(INFO) << "Usage: ./demo checkpoint path tokenizer path";
+  if (argc < 3) {
+    LOG(INFO) << "Usage: ./demo checkpoint_path tokenizer_path [--fp16|--bf16]";
     return -1;
   }
-  const char* checkpoint_path = argv[1];  // e.g. out/model.bin
+  const char* checkpoint_path = argv[1];
   const char* tokenizer_path = argv[2];
+  base::DataType activation_dtype = base::DataType::kDataTypeFp32;
+  for (int i = 3; i < argc; i++) {
+    if (std::string(argv[i]) == "--fp16") activation_dtype = base::DataType::kDataTypeFp16;
+    else if (std::string(argv[i]) == "--bf16") activation_dtype = base::DataType::kDataTypeBf16;
+  }
 
   model::Qwen2Model model(base::TokenizerType::kEncodeBpe, tokenizer_path,
     checkpoint_path, false);
-  auto init_status = model.init(base::DeviceType::kDeviceCUDA);
+  auto init_status = model.init(base::DeviceType::kDeviceCUDA, activation_dtype);
   if (!init_status) {
     LOG(FATAL) << "The model init failed, the error code is: " << init_status.get_err_code();
   }

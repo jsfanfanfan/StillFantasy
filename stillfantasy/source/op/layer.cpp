@@ -33,8 +33,9 @@ base::DeviceType BaseLayer::device_type() const { return device_type_; }
 
 void BaseLayer::set_device_type(base::DeviceType device_type) { device_type_ = device_type; }
 
-Layer::Layer(base::DeviceType device_type, LayerType layer_type, std::string layer_name)
-    : BaseLayer(device_type, layer_type, base::DataType::kDataTypeFp32, std::move(layer_name)) {}
+Layer::Layer(base::DeviceType device_type, LayerType layer_type, std::string layer_name,
+             base::DataType data_type)
+    : BaseLayer(device_type, layer_type, data_type, std::move(layer_name)) {}
 
 base::Status Layer::init() { return base::error::Success(); }
 
@@ -151,8 +152,9 @@ size_t Layer::input_size() const { return inputs_.size(); }
 size_t Layer::output_size() const { return outputs_.size(); }
 
 LayerParam::LayerParam(base::DeviceType device_type, LayerType layer_type, bool is_quant_layer,
-                       std::string layer_name)
-    : Layer(device_type, layer_type, std::move(layer_name)), is_quant_layer_(is_quant_layer) {}
+                       std::string layer_name, base::DataType data_type)
+    : Layer(device_type, layer_type, std::move(layer_name), data_type),
+      is_quant_layer_(is_quant_layer) {}
 
 base::Status LayerParam::set_weight(int32_t idx, const tensor::Tensor& weight) {
   CHECK_GE(idx, 0);

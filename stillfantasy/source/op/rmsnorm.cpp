@@ -4,8 +4,9 @@
 #include "kernels/cpu/rmsnorm_kernel.h"
 #include "kernels/kernels_interface.h"
 namespace op {
-RmsNormLayer::RmsNormLayer(base::DeviceType device_type, int32_t dim)
-    : LayerParam(device_type, LayerType::kLayerRMSNorm, false, "RMSNorm"), dim_(dim) {
+RmsNormLayer::RmsNormLayer(base::DeviceType device_type, int32_t dim,
+                          base::DataType data_type)
+    : LayerParam(device_type, LayerType::kLayerRMSNorm, false, "RMSNorm", data_type), dim_(dim) {
   reset_input_size(1);
   reset_output_size(1);
   reset_weight_size(1);
@@ -49,7 +50,7 @@ base::Status RmsNormLayer::check() const {
       return status;
     }
 
-    status = check_tensor_with_dim(get_weight(0), device_type_, data_type_, dim_);
+    status = check_tensor_with_dim(get_weight(0), device_type_, base::DataType::kDataTypeFp32, dim_);
     if (!status) {
       LOG(ERROR) << "The weight tensor error in the rmsnorm layer.";
       return status;

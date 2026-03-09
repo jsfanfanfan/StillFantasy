@@ -10,7 +10,8 @@ namespace op {
 class MatmulLayer : public LayerParam {
  public:
   explicit MatmulLayer(base::DeviceType device_type, int32_t dim0, int32_t dim1,
-                       bool is_quant_layer = false, bool has_bias = false);
+                       bool is_quant_layer = false, bool has_bias = false,
+                       base::DataType data_type = base::DataType::kDataTypeFp32);
 
   base::Status check() const override;
 

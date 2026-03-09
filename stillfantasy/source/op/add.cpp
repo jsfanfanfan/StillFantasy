@@ -1,8 +1,8 @@
 #include "op/add.h"
 #include "kernels/kernels_interface.h"
 namespace op {
-VecAddLayer::VecAddLayer(base::DeviceType device_type)
-    : Layer(device_type, LayerType::kLayerAdd, "Add") {
+VecAddLayer::VecAddLayer(base::DeviceType device_type, base::DataType data_type)
+    : Layer(device_type, LayerType::kLayerAdd, "Add", data_type) {
   reset_input_size(2);
   reset_output_size(1);
 }

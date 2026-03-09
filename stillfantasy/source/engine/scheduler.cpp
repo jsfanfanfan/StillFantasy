@@ -116,7 +116,7 @@ Scheduler::Scheduler(model::Model* model, int32_t max_num_blocks)
   int32_t block_size = kDefaultBlockSize;
   int32_t num_layers = model_ ? model_->get_layer_num() : 0;
   int32_t kv_dim = model_ ? model_->get_kv_dim() : 0;
-  base::DataType dtype = base::DataType::kDataTypeFp32;
+  base::DataType dtype = model_ ? model_->get_activation_dtype() : base::DataType::kDataTypeFp32;
   block_manager_ = std::make_unique<BlockManager>(
       num_layers, block_size, kv_dim, dtype,
       model_ ? model_->get_device_type() : base::DeviceType::kDeviceCPU,

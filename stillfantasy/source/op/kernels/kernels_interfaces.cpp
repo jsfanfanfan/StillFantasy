@@ -16,6 +16,7 @@
 #include "cuda/rmsnorm_kernel.cuh"
 #include "cuda/rope_kernel.cuh"
 #include "cuda/swiglu_kernel.cuh"
+#include "cuda/cast_kernel.cuh"
 #include "kernels_interface.h"
 namespace kernel {
 AddKernel get_add_kernel(base::DeviceType device_type) {
@@ -138,6 +139,14 @@ ScaleSumKernel get_scale_sum_kernel(base::DeviceType device_type) {
     LOG(FATAL) << "Unknown device type for get a scale and reduce kernel.";
     return nullptr;
   }
+}
+
+void cast_logits_to_float(base::DeviceType device_type, const tensor::Tensor& src,
+                          tensor::Tensor& dst, void* stream) {
+  if (device_type == base::DeviceType::kDeviceCUDA) {
+    cast_logits_to_float_cu(src, dst, stream);
+  }
+  /* CPU path: A16 not used on CPU; if needed, add CPU cast here */
 }
 
 }  // namespace kernel

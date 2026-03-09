@@ -4,7 +4,8 @@
 namespace op {
 class RmsNormLayer : public LayerParam {
  public:
-  explicit RmsNormLayer(base::DeviceType device_type, int32_t dim);
+  explicit RmsNormLayer(base::DeviceType device_type, int32_t dim,
+                       base::DataType data_type = base::DataType::kDataTypeFp32);
 
   base::Status check() const override;
 

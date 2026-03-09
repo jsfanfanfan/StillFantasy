@@ -18,7 +18,8 @@ struct EmbeddingOutput {
 class EmbeddingLayer : public LayerParam {
  public:
   explicit EmbeddingLayer(base::DeviceType device_type, int32_t dim, int32_t seq_len,
-                          int32_t vocab_size);
+                          int32_t vocab_size,
+                          base::DataType data_type = base::DataType::kDataTypeFp32);
 
   base::Status check() const override;
 

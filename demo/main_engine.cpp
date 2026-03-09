@@ -26,20 +26,32 @@
 
 static int get_num_sequences(int argc, char* argv[]) {
   for (int i = 3; i < argc; i++) {
+    std::string arg = argv[i];
+    if (arg == "--fp16" || arg == "--bf16") continue;
     int n = std::atoi(argv[i]);
     if (n > 0) return std::min(n, 32);
   }
   return 6;
 }
 
+static base::DataType get_activation_dtype(int argc, char* argv[]) {
+  for (int i = 3; i < argc; i++) {
+    std::string arg = argv[i];
+    if (arg == "--fp16") return base::DataType::kDataTypeFp16;
+    if (arg == "--bf16") return base::DataType::kDataTypeBf16;
+  }
+  return base::DataType::kDataTypeFp32;
+}
+
 int main(int argc, char* argv[]) {
   if (argc < 3) {
-    LOG(INFO) << "Usage: ./main_engine checkpoint_path tokenizer_path [num_sequences]";
+    LOG(INFO) << "Usage: ./main_engine checkpoint_path tokenizer_path [num_sequences] [--fp16|--bf16]";
     return -1;
   }
   const char* checkpoint_path = argv[1];
   const char* tokenizer_path = argv[2];
   int num_sequences = get_num_sequences(argc, argv);
+  base::DataType activation_dtype = get_activation_dtype(argc, argv);
 
   std::unique_ptr<model::Model> model;
 #if defined(LLAMA3_SUPPORT)
@@ -53,7 +65,7 @@ int main(int argc, char* argv[]) {
                                               tokenizer_path, checkpoint_path, false);
 #endif
 
-  auto init_status = model->init(base::DeviceType::kDeviceCUDA);
+  auto init_status = model->init(base::DeviceType::kDeviceCUDA, activation_dtype);
   if (!init_status) {
     LOG(FATAL) << "Model init failed: " << init_status.get_err_code();
   }

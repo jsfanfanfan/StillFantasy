@@ -3,8 +3,9 @@
 #include "kernels/cpu/rope_kernel.h"
 #include "kernels/kernels_interface.h"
 namespace op {
-RoPELayer::RoPELayer(base::DeviceType device_type, int32_t dim, int32_t kv_dim, int32_t head_size)
-    : Layer(device_type, LayerType::kLayerRoPe, "RoPe"),
+RoPELayer::RoPELayer(base::DeviceType device_type, int32_t dim, int32_t kv_dim, int32_t head_size,
+                     base::DataType data_type)
+    : Layer(device_type, LayerType::kLayerRoPe, "RoPe", data_type),
       dim_(dim),
       kv_dim_(kv_dim),
       head_size_(head_size) {

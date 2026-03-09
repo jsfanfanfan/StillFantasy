@@ -9,6 +9,7 @@
 #include <utility>
 #include "../op/kernels/cpu/rope_kernel.h"
 #include "../op/kernels/cuda/rope_kernel.cuh"
+#include "../op/kernels/kernels_interface.h"
 #include "base/tick.h"
 namespace model {
 
@@ -105,7 +106,8 @@ Qwen3Model::Qwen3Model(base::TokenizerType tokenizer_type, std::string token_pat
     : Model(tokenizer_type, base::ModelType::kModelTypeLLama2, std::move(token_path),
             std::move(model_path), is_quant_model) {}
 
-base::Status Qwen3Model::init(base::DeviceType device_type) {
+base::Status Qwen3Model::init(base::DeviceType device_type,
+                              base::DataType activation_dtype) {
   using namespace base;
   if (token_path_.empty()) {
     return error::PathNotValid(token_path_);
@@ -113,8 +115,14 @@ base::Status Qwen3Model::init(base::DeviceType device_type) {
   if (device_type == base::DeviceType::kDeviceCPU && is_quant_model_) {
     return error::InternalError("The cpu device do not support int8 quant model.");
   }
+  if (device_type == base::DeviceType::kDeviceCPU &&
+      (activation_dtype == base::DataType::kDataTypeFp16 ||
+       activation_dtype == base::DataType::kDataTypeBf16)) {
+    return error::InternalError("W8A16 (fp16/bf16) is only supported on CUDA.");
+  }
 
   device_type_ = device_type;
+  activation_dtype_ = activation_dtype;
   if (device_type == DeviceType::kDeviceCUDA) {
     cudaSetDevice(0);
     cuda_config_ = std::make_shared<kernel::CudaConfig>();
@@ -170,16 +178,16 @@ base::Status Qwen3Model::forward(const tensor::Tensor& input, const tensor::Tens
 void Qwen3Model::create_nonparam_layers() {
   CHECK(qwen_layers_ != nullptr);
   qwen_layers_->rope_layer_ = std::make_shared<op::RoPELayer>(
-      device_type_, config_->dim_, config_->kv_dim_, config_->head_size_);
+      device_type_, config_->dim_, config_->kv_dim_, config_->head_size_, activation_dtype_);
 
   qwen_layers_->mha_layer_ = std::make_shared<op::MultiHeadAttention>(
       device_type_, 0, config_->kv_mul_, config_->kv_dim_, config_->seq_len_, config_->head_num_,
-      config_->head_size_);
+      config_->head_size_, activation_dtype_);
 
-  qwen_layers_->add_layer_ = std::make_shared<op::VecAddLayer>(device_type_);
+  qwen_layers_->add_layer_ = std::make_shared<op::VecAddLayer>(device_type_, activation_dtype_);
 
   qwen_layers_->swiglu_layer_ =
-      std::make_shared<op::SwiGLULayer>(device_type_, config_->immediate_dim_);
+      std::make_shared<op::SwiGLULayer>(device_type_, config_->immediate_dim_, activation_dtype_);
 }
 
 void Qwen3Model::create_param_quant_layers() {}
@@ -197,7 +205,7 @@ void Qwen3Model::create_param_layers() {
   // rmsnorm attention attention, ffn, final
   for (int32_t i = 0; i < 2 * config_->layer_num_ + 1; ++i) {
     std::shared_ptr<op::RmsNormLayer> rms_norm_layer =
-        std::make_shared<op::RmsNormLayer>(device_type_, hidden_dim);
+        std::make_shared<op::RmsNormLayer>(device_type_, hidden_dim, activation_dtype_);
 
     rms_norm_layer->set_weight(0, {hidden_dim}, weight_ptr, cpu_device_type);
     qwen_layers_->rmsnorm_layers_.push_back(rms_norm_layer);
@@ -207,14 +215,16 @@ void Qwen3Model::create_param_layers() {
 
   // embedding layer
   qwen_layers_->embedding_layer_ = std::make_shared<op::EmbeddingLayer>(
-      device_type_, hidden_dim, config_->seq_len_, std::abs(config_->vocab_size_));
+      device_type_, hidden_dim, config_->seq_len_, std::abs(config_->vocab_size_),
+      activation_dtype_);
   qwen_layers_->embedding_layer_->set_weight(0, {std::abs(config_->vocab_size_), hidden_dim},
                                              weight_ptr, cpu_device_type);
   pos += config_->vocab_size_ * hidden_dim;
 
   // query
   for (int32_t i = 0; i < config_->layer_num_; ++i) {
-    auto wq = std::make_shared<op::MatmulLayer>(device_type_, dim, hidden_dim, false);
+    auto wq = std::make_shared<op::MatmulLayer>(device_type_, dim, hidden_dim, false, false,
+                                                activation_dtype_);
     wq->set_weight(0, {dim, hidden_dim}, this->raw_model_data_->weight(pos), cpu_device_type);
     qwen_layers_->wq_layers_.push_back(wq);
     pos = pos + hidden_dim * dim;
@@ -223,7 +233,7 @@ void Qwen3Model::create_param_layers() {
   // query norm
   for (int32_t i = 0; i < config_->layer_num_; ++i) {
     std::shared_ptr<op::RmsNormLayer> rms_norm_layer =
-        std::make_shared<op::RmsNormLayer>(device_type_, config_->head_size_);
+        std::make_shared<op::RmsNormLayer>(device_type_, config_->head_size_, activation_dtype_);
     rms_norm_layer->set_weight(0, {config_->head_size_}, this->raw_model_data_->weight(pos),
                                cpu_device_type);
     qwen_layers_->rmsnorm_layers_.push_back(rms_norm_layer);
@@ -232,7 +242,8 @@ void Qwen3Model::create_param_layers() {
 
   // key
   for (int32_t i = 0; i < config_->layer_num_; ++i) {
-    auto wk = std::make_shared<op::MatmulLayer>(device_type_, hidden_dim, kv_dim, false);
+    auto wk = std::make_shared<op::MatmulLayer>(device_type_, hidden_dim, kv_dim, false, false,
+                                                activation_dtype_);
     wk->set_weight(0, {hidden_dim, kv_dim}, this->raw_model_data_->weight(pos), cpu_device_type);
     qwen_layers_->wk_layers_.push_back(wk);
     pos = pos + hidden_dim * kv_dim;
@@ -241,7 +252,7 @@ void Qwen3Model::create_param_layers() {
   // key norm
   for (int32_t i = 0; i < config_->layer_num_; ++i) {
     std::shared_ptr<op::RmsNormLayer> rms_norm_layer =
-        std::make_shared<op::RmsNormLayer>(device_type_, config_->head_size_);
+        std::make_shared<op::RmsNormLayer>(device_type_, config_->head_size_, activation_dtype_);
     rms_norm_layer->set_weight(0, {config_->head_size_}, this->raw_model_data_->weight(pos),
                                cpu_device_type);
     qwen_layers_->rmsnorm_layers_.push_back(rms_norm_layer);
@@ -250,7 +261,8 @@ void Qwen3Model::create_param_layers() {
 
   // value
   for (int32_t i = 0; i < config_->layer_num_; ++i) {
-    auto wv = std::make_shared<op::MatmulLayer>(device_type_, hidden_dim, kv_dim, false);
+    auto wv = std::make_shared<op::MatmulLayer>(device_type_, hidden_dim, kv_dim, false, false,
+                                                activation_dtype_);
     wv->set_weight(0, {hidden_dim, kv_dim}, this->raw_model_data_->weight(pos), cpu_device_type);
     qwen_layers_->wv_layers_.push_back(wv);
     pos += kv_dim * hidden_dim;
@@ -258,7 +270,8 @@ void Qwen3Model::create_param_layers() {
 
   // output
   for (int32_t i = 0; i < config_->layer_num_; ++i) {
-    auto wo = std::make_shared<op::MatmulLayer>(device_type_, hidden_dim, dim, false);
+    auto wo = std::make_shared<op::MatmulLayer>(device_type_, hidden_dim, dim, false, false,
+                                                activation_dtype_);
     wo->set_weight(0, {hidden_dim, dim}, this->raw_model_data_->weight(pos), cpu_device_type);
     qwen_layers_->wo_layers_.push_back(wo);
     pos = pos + dim * hidden_dim;
@@ -267,7 +280,8 @@ void Qwen3Model::create_param_layers() {
   // w1 layers
   int32_t immediate_dim = config_->immediate_dim_;
   for (int32_t i = 0; i < config_->layer_num_; ++i) {
-    auto w1 = std::make_shared<op::MatmulLayer>(device_type_, immediate_dim, hidden_dim, false);
+    auto w1 = std::make_shared<op::MatmulLayer>(device_type_, immediate_dim, hidden_dim, false,
+                                                false, activation_dtype_);
     w1->set_weight(0, {immediate_dim, hidden_dim}, this->raw_model_data_->weight(pos),
                    cpu_device_type);
     qwen_layers_->w1_layers_.push_back(w1);
@@ -276,7 +290,8 @@ void Qwen3Model::create_param_layers() {
 
   // w2 layers
   for (int32_t i = 0; i < config_->layer_num_; ++i) {
-    auto w2 = std::make_shared<op::MatmulLayer>(device_type_, hidden_dim, immediate_dim, false);
+    auto w2 = std::make_shared<op::MatmulLayer>(device_type_, hidden_dim, immediate_dim, false,
+                                                false, activation_dtype_);
     w2->set_weight(0, {hidden_dim, immediate_dim}, this->raw_model_data_->weight(pos),
                    cpu_device_type);
     qwen_layers_->w2_layers_.push_back(w2);
@@ -285,7 +300,8 @@ void Qwen3Model::create_param_layers() {
 
   // w3 layers
   for (int32_t i = 0; i < config_->layer_num_; ++i) {
-    auto w3 = std::make_shared<op::MatmulLayer>(device_type_, immediate_dim, hidden_dim, false);
+    auto w3 = std::make_shared<op::MatmulLayer>(device_type_, immediate_dim, hidden_dim, false,
+                                                false, activation_dtype_);
     w3->set_weight(0, {immediate_dim, hidden_dim}, this->raw_model_data_->weight(pos),
                    cpu_device_type);
     qwen_layers_->w3_layers_.push_back(w3);
@@ -293,7 +309,8 @@ void Qwen3Model::create_param_layers() {
   }
 
   auto lm_head = std::make_shared<op::MatmulLayer>(device_type_, config_->vocab_size_,
-                                                   config_->hidden_dim_, false);
+                                                   config_->hidden_dim_, false, false,
+                                                   activation_dtype_);
   lm_head->set_weight(0, {config_->vocab_size_, config_->hidden_dim_},
                       this->raw_model_data_->weight(pos), cpu_device_type);
   qwen_layers_->cls_layer_ = lm_head;
@@ -318,8 +335,7 @@ void Qwen3Model::init_mem() {
       base::CUDADeviceAllocatorFactory::get_instance();
 
   tensor::Tensor input_tokens(base::DataType::kDataTypeInt32, 1, true, alloc_cpu);
-  tensor::Tensor input_embeddings(base::DataType::kDataTypeFp32, 1, config_->hidden_dim_, true,
-                                  alloc);
+  tensor::Tensor input_embeddings(activation_dtype_, 1, config_->hidden_dim_, true, alloc);
   tensor::Tensor sin_cache(base::DataType::kDataTypeFp32, config_->head_size_ * config_->seq_len_,
                            true, alloc);
   tensor::Tensor cos_cache(base::DataType::kDataTypeFp32, config_->head_size_ * config_->seq_len_,
@@ -331,31 +347,31 @@ void Qwen3Model::init_mem() {
   CHECK(insert_buffer(ModelBufferType::kInputTokens, input_tokens));
   CHECK(insert_buffer(ModelBufferType::kInputEmbeddings, input_embeddings));
 
-  tensor::Tensor rms_output(base::DataType::kDataTypeFp32, config_->hidden_dim_, true, alloc);
-  tensor::Tensor out_mha(base::DataType::kDataTypeFp32, config_->dim_, true, alloc);
+  tensor::Tensor rms_output(activation_dtype_, config_->hidden_dim_, true, alloc);
+  tensor::Tensor out_mha(activation_dtype_, config_->dim_, true, alloc);
 
   CHECK(insert_buffer(ModelBufferType::kOutputRMSNorm, rms_output));
   CHECK(insert_buffer(ModelBufferType::kOutputMHA, out_mha));
   CHECK(insert_buffer(ModelBufferType::kW2Output, rms_output));
   CHECK(insert_buffer(ModelBufferType::kFFNRMSNorm, rms_output));
 
-  tensor::Tensor w1_output(base::DataType::kDataTypeFp32, config_->immediate_dim_, true, alloc);
-  tensor::Tensor w3_output(base::DataType::kDataTypeFp32, config_->immediate_dim_, true, alloc);
+  tensor::Tensor w1_output(activation_dtype_, config_->immediate_dim_, true, alloc);
+  tensor::Tensor w3_output(activation_dtype_, config_->immediate_dim_, true, alloc);
 
   CHECK(insert_buffer(ModelBufferType::kW1Output, w1_output));
   CHECK(insert_buffer(ModelBufferType::kW3Output, w3_output));
 
   // kv cache
-  tensor::Tensor key_cache(base::DataType::kDataTypeFp32, config_->layer_num_, config_->seq_len_,
+  tensor::Tensor key_cache(activation_dtype_, config_->layer_num_, config_->seq_len_,
                            config_->kv_dim_, true, alloc);
-  tensor::Tensor value_cache(base::DataType::kDataTypeFp32, config_->layer_num_, config_->seq_len_,
+  tensor::Tensor value_cache(activation_dtype_, config_->layer_num_, config_->seq_len_,
                              config_->kv_dim_, true, alloc);
 
   CHECK(insert_buffer(ModelBufferType::kKeyCache, key_cache));
   CHECK(insert_buffer(ModelBufferType::kValueCache, value_cache));
 
   // Wq query output
-  tensor::Tensor query(base::DataType::kDataTypeFp32, config_->dim_, true, alloc);
+  tensor::Tensor query(activation_dtype_, config_->dim_, true, alloc);
   CHECK(insert_buffer(ModelBufferType::kQuery, query));
 
   // Pos tensor
@@ -363,17 +379,16 @@ void Qwen3Model::init_mem() {
   CHECK(insert_buffer(ModelBufferType::kInputPos, pos_tensor));
 
   // Attention output
-  tensor::Tensor attn(base::DataType::kDataTypeFp32, config_->head_num_, config_->seq_len_, true,
-                      alloc);
+  tensor::Tensor attn(activation_dtype_, config_->head_num_, config_->seq_len_, true, alloc);
   CHECK(insert_buffer(ModelBufferType::kScoreStorage, attn));
-  tensor::Tensor attn_output(base::DataType::kDataTypeFp32, config_->hidden_dim_, true, alloc);
+  tensor::Tensor attn_output(activation_dtype_, config_->hidden_dim_, true, alloc);
   CHECK(insert_buffer(ModelBufferType::kAttnOutput, attn_output));
 
   // final forward output
-  tensor::Tensor forward_output(base::DataType::kDataTypeFp32, config_->vocab_size_, true, alloc);
+  tensor::Tensor forward_output(activation_dtype_, config_->vocab_size_, true, alloc);
   if (device_type_ == base::DeviceType::kDeviceCUDA) {
     tensor::Tensor forward_output_cpu(base::DataType::kDataTypeFp32, config_->vocab_size_, true,
-                                      alloc_cpu);
+                                      alloc);
     CHECK(insert_buffer(ModelBufferType::kForwardOutputCPU, forward_output_cpu));
   }
 
@@ -628,14 +643,21 @@ void Qwen3Model::cls_logits(const tensor::Tensor& input) const {
 
 int32_t Qwen3Model::post_processing(const tensor::Tensor& pos, bool is_prompt) const {
   tensor::Tensor forward_output = get_buffer(ModelBufferType::kForwardOutput);
-  const float* forward_logits = forward_output.ptr<float>();
+  const float* forward_logits = nullptr;
+  void* stream = cuda_config_ ? cuda_config_->stream : nullptr;
+  if (activation_dtype_ == base::DataType::kDataTypeFp32) {
+    forward_logits = forward_output.ptr<float>();
+  } else {
+    tensor::Tensor forward_output_cpu = get_buffer(ModelBufferType::kForwardOutputCPU);
+    kernel::cast_logits_to_float(device_type_, forward_output, forward_output_cpu, stream);
+    forward_logits = forward_output_cpu.ptr<float>();
+  }
 
   int32_t next = 0;
   if (is_prompt) {
     next = -1;
   } else {
-    next = static_cast<int32_t>(sampler_->sample(forward_logits, forward_output.size(),
-                                                 cuda_config_ ? cuda_config_->stream : nullptr));
+    next = static_cast<int32_t>(sampler_->sample(forward_logits, forward_output.size(), stream));
   }
   return next;
 }

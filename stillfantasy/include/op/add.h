@@ -5,7 +5,8 @@
 namespace op {
 class VecAddLayer : public Layer {
  public:
-  explicit VecAddLayer(base::DeviceType device_type);
+  explicit VecAddLayer(base::DeviceType device_type,
+                       base::DataType data_type = base::DataType::kDataTypeFp32);
 
   base::Status check() const override;
 

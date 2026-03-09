@@ -71,5 +71,9 @@ SwigluKernel get_swiglu_kernel(base::DeviceType device_type, void* stream = null
 ScaleSumKernel get_scale_sum_kernel(base::DeviceType device_type);
 
 RMSNormKernelDim get_rmsnorm_dim_kernel(base::DeviceType device_type);
+
+/** Copy logits from A16 (Fp16/Bf16) to float tensor; no-op if src is Fp32. For sampler. */
+void cast_logits_to_float(base::DeviceType device_type, const tensor::Tensor& src,
+                          tensor::Tensor& dst, void* stream);
 }  // namespace kernel
 #endif  // KERNELS_INTERFACE_H

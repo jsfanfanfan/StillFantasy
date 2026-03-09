@@ -216,16 +216,16 @@ std::pair<tensor::Tensor, tensor::Tensor> Model::slice_kv_cache(int32_t layer_id
                                                                 int32_t token_pos) const {
   int32_t layer_offset = layer_idx * config_->seq_len_ * config_->kv_dim_;
   int32_t cache_offset = layer_offset + token_pos * config_->kv_dim_;
+  size_t elem_size = base::DataTypeSize(activation_dtype_);
+  size_t byte_offset = static_cast<size_t>(cache_offset) * elem_size;
 
-  float* key_cache_ptr =
-      const_cast<float*>(get_buffer(ModelBufferType::kKeyCache).ptr<float>(cache_offset));
-  float* val_cache_ptr =
-      const_cast<float*>(get_buffer(ModelBufferType::kValueCache).ptr<float>(cache_offset));
+  void* key_base = const_cast<void*>(get_buffer(ModelBufferType::kKeyCache).get_buffer()->ptr());
+  void* val_base = const_cast<void*>(get_buffer(ModelBufferType::kValueCache).get_buffer()->ptr());
+  char* key_ptr = static_cast<char*>(key_base) + byte_offset;
+  char* val_ptr = static_cast<char*>(val_base) + byte_offset;
 
-  tensor::Tensor key(base::DataType::kDataTypeFp32, config_->kv_dim_, false, nullptr,
-                     key_cache_ptr);
-  tensor::Tensor val(base::DataType::kDataTypeFp32, config_->kv_dim_, false, nullptr,
-                     val_cache_ptr);
+  tensor::Tensor key(activation_dtype_, config_->kv_dim_, false, nullptr, key_ptr);
+  tensor::Tensor val(activation_dtype_, config_->kv_dim_, false, nullptr, val_ptr);
   key.set_device_type(device_type_);
   val.set_device_type(device_type_);
   return {key, val};
@@ -241,18 +241,19 @@ tensor::Tensor Model::fill_input(const tensor::Tensor& pos_tensor,
   if (is_prompt) {
     index = pos;
   }
+  size_t elem_size = base::DataTypeSize(activation_dtype_);
 #if defined(QWEN3_SUPPORT)
-  std::shared_ptr<base::Buffer> input_emb_buffer = std::make_shared<base::Buffer>(
-      config_->hidden_dim_ * sizeof(float), nullptr,
-      input_embeddings.ptr<float>(index * config_->hidden_dim_), true);
-  tensor::Tensor input(base::DataType::kDataTypeFp32, config_->hidden_dim_);
-
+  int32_t dim = config_->hidden_dim_;
 #else
-  std::shared_ptr<base::Buffer> input_emb_buffer =
-      std::make_shared<base::Buffer>(config_->dim_ * sizeof(float), nullptr,
-                                     input_embeddings.ptr<float>(index * config_->dim_), true);
-  tensor::Tensor input(base::DataType::kDataTypeFp32, config_->dim_);
+  int32_t dim = config_->dim_;
 #endif
+  size_t byte_offset = static_cast<size_t>(index) * dim * elem_size;
+  void* emb_ptr = const_cast<void*>(input_embeddings.get_buffer()->ptr());
+  char* ptr = static_cast<char*>(emb_ptr) + byte_offset;
+
+  std::shared_ptr<base::Buffer> input_emb_buffer =
+      std::make_shared<base::Buffer>(dim * elem_size, nullptr, ptr, true);
+  tensor::Tensor input(activation_dtype_, dim);
   input.assign(input_emb_buffer);
   input.set_device_type(device_type_);
   return input;

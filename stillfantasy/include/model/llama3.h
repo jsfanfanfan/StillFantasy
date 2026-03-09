@@ -35,7 +35,8 @@ class LLama2Model : public Model {
   explicit LLama2Model(base::TokenizerType tokenizer_type, std::string token_path,
                        std::string model_path, bool is_quant_model);
 
-  base::Status init(base::DeviceType device_type) override;
+  base::Status init(base::DeviceType device_type,
+                    base::DataType activation_dtype = base::DataType::kDataTypeFp32) override;
 
   base::Status predict(const tensor::Tensor& input, const tensor::Tensor& pos_tensor,
                        bool is_prompt, int& next) const override;
