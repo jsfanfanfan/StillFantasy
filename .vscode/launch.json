@@ -1,0 +1,39 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "调试",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "/home/fjs/StillFantasy/build/test/test_llm",
+            "args": [
+                "/home/fjs/StillFantasy/models/stories110M.bin",
+                "/home/fjs/StillFantasy/models/tokenizer.model"
+             ], // 可执行文件的命令行参数，如需要可添加
+            "stopAtEntry": false, // 是否在main函数入口暂停
+            "cwd": "/home/fjs/StillFantasy", // 工作目录，根据需要调整
+            "environment": [], // 环境变量，例如 [{"name": "LD_LIBRARY_PATH", "value": "/usr/local/lib"}]
+            "externalConsole": false, // 设为 true 可打开外部终端（已废弃，推荐用 integratedTerminal）
+            "console": "integratedTerminal", // 推荐：在 VS Code 内部终端中运行
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "关闭 debuginfod，避免下载系统 DSO 符号卡住",
+                    "text": "-gdb-set debuginfod enabled off",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "为 SIGINT 等信号启用整齐打印",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "将反汇编风格设为 Intel",
+                    "text": "set disassembly-flavor intel",
+                    "ignoreFailures": true
+                }
+            ],
+            "miDebuggerPath": "/usr/bin/gdb" // 确保路径正确，通常就是 /usr/bin/gdb
+        }
+    ]
+}
